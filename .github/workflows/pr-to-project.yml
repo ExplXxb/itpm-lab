@@ -1,0 +1,88 @@
+name: Add PR to Project
+
+on:
+  pull_request:
+    types: [opened]
+
+jobs:
+  add-pr-to-project:
+    runs-on: ubuntu-latest
+
+    steps:
+      # Додати PR у Project
+      - name: Add PR to project
+        id: add_to_project
+        uses: actions/add-to-project@v0.6.1
+        with:
+          project-url: https://github.com/users/ExplXxb/projects/4
+          github-token: ${{ secrets.PROJECT_TOKEN }}
+
+      # Оновити поля Type та Status
+      - name: Update Project Fields
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.PROJECT_TOKEN }}
+          script: |
+            const projectItemId = "${{ steps.add_to_project.outputs.itemId }}";
+
+            // Отримати всі поля Project
+            const fieldsQuery = `
+              query($org: String!, $projectNumber: Int!) {
+                user(login: $org) {
+                  projectV2(number: $projectNumber) {
+                    fields(first: 50) {
+                      nodes {
+                        ... on ProjectV2FieldCommon {
+                          id
+                          name
+                        }
+                        ... on ProjectV2SingleSelectField {
+                          id
+                          name
+                          options {
+                            id
+                            name
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }`;
+
+            const result = await github.graphql(fieldsQuery, {
+              org: "ExplXxb",
+              projectNumber: 4
+            });
+
+            const fields = result.user.projectV2.fields.nodes;
+
+            function getFieldId(name) {
+              return fields.find(f => f.name === name).id;
+            }
+
+            function getOptionId(fieldName, optionName) {
+              const field = fields.find(f => f.name === fieldName);
+              return field.options.find(o => o.name === optionName).id;
+            }
+
+            const typeFieldId = getFieldId("Type");
+            const statusFieldId = getFieldId("Status");
+            const featureId = getOptionId("Type", "Feature");
+            const inProgressId = getOptionId("Status", "In Progress");
+
+            // Mutation для оновлення полів
+            const mutation = `
+              mutation($projectItemId: ID!, $typeFieldId: ID!, $featureId: String!, $statusFieldId: ID!, $inProgressId: String!) {
+                setType: updateProjectV2ItemFieldValue(input: {itemId: $projectItemId, fieldId: $typeFieldId, value: {singleSelectOptionId: $featureId}}) { clientMutationId }
+                setStatus: updateProjectV2ItemFieldValue(input: {itemId: $projectItemId, fieldId: $statusFieldId, value: {singleSelectOptionId: $inProgressId}}) { clientMutationId }
+              }
+            `;
+
+            await github.graphql(mutation, {
+              projectItemId,
+              typeFieldId,
+              featureId,
+              statusFieldId,
+              inProgressId
+            });
